@@ -1,0 +1,728 @@
+[00:00:00] The following content is provided under a Creative Commons license. Your support will help MIT OpenCourseWare
+[00:00:06] continue to offer high quality educational resources for free. To make a donation, or to view additional materials
+[00:00:12] from hundreds of MIT courses, visit MIT OpenCourseWare at ocw.mit.edu.
+[00:00:26] PROFESSOR: This is very exciting. In the previous lecture, we learned all about buffer overflow attacks,
+[00:00:32] and today we're going to continue to discuss some techniques to launch these attacks. So, the basic idea of all these buffer overflow attacks
+[00:00:41] is as follows. So, first of all, they leverage a couple different facts.
+[00:00:54] So, one thing that they leverage is that system software is often written in C.
+[00:01:07] And so by system software, I mean things like databases, compilers, network servers, things like that.
+[00:01:15] And you can also think of things like your favorite command shell. All of those types of things are typically written in C. So,
+[00:01:21] why are these things typically written in C? Well, they're written in C because our community, of course, is obsessed with speed.
+[00:01:28] And so C is supposed to be like high-level assembly, it takes us very close to the hardware, and so as a result,
+[00:01:34] all these very mission critical systems are written in this very low level language. Now, the problem with things being written in C
+[00:01:42] is that C actually exposes raw memory Addresses.
+[00:01:57] Right? And so not only does it expose raw memory addresses, but it also performs no bounds checking when programs
+[00:02:04] manipulate those raw addresses. Right? And so as you can imagine, this is a recipe for disaster.
+[00:02:09] OK? So, once again, why doesn't C check these bounds? Well, one reason is because the hardware doesn't do that.
+[00:02:15] And people who write in C typically want the max amount of speed possible.
+[00:02:20] The other reason is that in C, as we'll discuss later, it can actually be very difficult to determine the semantics of what it means to have a pointer that's
+[00:02:28] actually in bounds. So, in some cases, it would be very difficult for the C runtime to automatically do that.
+[00:02:33] Now we'll discuss some techniques which will actually try to do that type of automatic inference. But as we'll see, none of these techniques
+[00:02:39] are fully bulletproof. And so these attacks also leverage knowledge
+[00:02:48] of the x86 architecture.
+[00:02:56] And by knowledge of that architecture I mean things like what's the direction that the stack grows, right?
+[00:03:02] What are the calling conventions for functions? When you invoke a C function, what is the stack going to look like?
+[00:03:07] And when you allocate an object on the heap, what are those chief allocation structures going to look like? And so let's look at a simple example.
+[00:03:15] It's very similar to something that you saw in the last lecture.
+[00:03:21] So, we've got you're standard read request up here.
+[00:03:28] And then you've got a buffer. That's here.
+[00:03:34] And by now you've probably trained your lizard brain instincts-- whenever you see a buffer you're probably filled with fear-- that is the right attitude.
+[00:03:41] And so we've got the buffer up here, and then we've got the canonical int i.
+[00:03:48] And then we've got the infamous "gets" command.
+[00:03:56] And then you've got some other stuff here. Right? So as we discussed in lecture last week,
+[00:04:01] this is problematic, right? Because this gets operation here does not actually check the bounds on the buffer. So, what can happen is that if the user actually supplies
+[00:04:11] the buffer-- and actually put that guy up here, for example--
+[00:04:17] if that buffer comes in from the user and we use this unsafe function here, we can actually overflow this buffer.
+[00:04:23] We can actually rewrite stuff that's on the stack. So, just a reminder of what that stuff looks
+[00:04:29] like-- let's look at a stack diagram here-- so
+[00:04:36] let's say here we've got I. Let's say here we've got a buf
+[00:04:55] Right? So, we've got the first address of buffer here. We've got the last one up here. I apologize for my handwriting, I'm
+[00:05:01] used to writing on the marker board. You should pray for me. So, anyways, then up here, we've got the saved value
+[00:05:11] of the break pointer.
+[00:05:18] We've got the return address for the function there.
+[00:05:26] And then we've got some other stuff from the previous frame.
+[00:05:32] So, don't forget, we've got the stack pointer,
+[00:05:41] which goes there. And then we've got the new break pointer, which goes here.
+[00:06:02] The entry stack pointer goes there, and then somewhere up here, we've got the entry break point.
+[00:06:14] Right? So, just as a reminder, the way that the Stack Overflow works is that basically, it goes this way.
+[00:06:22] Right? So, when the gets operation is called, we start writing bytes into buf, and eventually it's
+[00:06:27] going to start overwriting these things that are on the stack. And so this is basically-- should all
+[00:06:33] look pretty familiar to you. So. What does the attacker do to take advantage of that?
+[00:06:38] Basically supplies that long input. And so the key idea here is that this can be attacker-supplied.
+[00:06:45] And so, if this return address is attacker-supplied, then basically the attacker can determine
+[00:06:50] where this function's going to jump to after [INAUDIBLE] execution. So, what can the attacker do once it's actually
+[00:06:57] been able to hijack that return address, and jump wherever it wants. Well, basically the attacker is now
+[00:07:02] running code with the privileges of the process that it's just hijacked, for example. So, if that process was a high priority process,
+[00:07:10] let's say it was running root, or admin, whatever they call the super-user of your favorite operating system, then now, that program, which is controlled by the attacker,
+[00:07:18] can do whatever it wants using the authority of that high-priority program.
+[00:07:24] So, it can do things, like it could maybe read files, it can send spam, let's say if you corrupted a mail server.
+[00:07:29] It can even do things like actually defeat firewalls, right, because the idea of a firewall
+[00:07:35] is that there's going to be this distinction between good machines that are behind the firewall and bad machines that are outside of the firewall.
+[00:07:40] So, typically machines are inside of the firewall, they have a lot of trust with each other. But if you can subvert a machine that
+[00:07:46] is actually inside the firewall, right, that's great. Because now you can just sort of skip past a lot of those checks
+[00:07:52] that those machines don't have because they think that you're a trusted individual. So, one thing you might be thinking,
+[00:07:59] or I remember I was thinking this when I was a student, was, "OK, fine, so I've showed you how to do this buffer overflow, but why
+[00:08:05] didn't the OS stop this? Right? Isn't the OS supposed to be that thing that's sort of sitting around like Guardians of the Galaxy
+[00:08:11] and defending all this kind of evil stuff from happening?" The thing to note is that the OS actually isn't watching you
+[00:08:18] all the time. Right? The hardware is watching all the time. It's the thing that's actually fetching instructions,
+[00:08:24] and decoding them, and doing things like that. But to a first approximation, what does the OS do?
+[00:08:29] It basically sets up some page table stuff, and then it basically lets you, the application, run, and if you ask the operating system for services--
+[00:08:36] so for example, you want to send a network packet, or you want to do some IPC, or things like that, then you'll invoke a system call,
+[00:08:43] and you'll actually trap into OS. But other than that, the operating system is not looking at each and every instruction
+[00:08:49] that your application is executing. So, in other words, when this buffer overflowed,
+[00:08:56] it's not like the operating system was looking at each of these memory axises for signs that [INAUDIBLE]. Right?
+[00:09:01] All of this address space belongs to you, this [INAUDIBLE] process right, so you get to do with it what you want to do with it, right?
+[00:09:06] Or at least this is the whole C attitude towards life, right? Life fast, die young. So. That's why the operating system can't help you right there.
+[00:09:14] So, later in the lecture, we will discuss some things that the operating system can do with respect to the hardware
+[00:09:21] so that it can help protect against these types of attacks. Once again, it's actually just the hardware that's interposing on every little thing that you do.
+[00:09:27] So, you can actually take advantage of some of that stuff, for example, using special types of [INAUDIBLE] protections and things like that, that we'll discuss a little bit later.
+[00:09:34] That's basically an overview of what the buffer overflow looks like.
+[00:09:39] So, how are we gonna fix these things? So, one fix for avoiding buffer overflow
+[00:09:49] is to simply avoid bugs in your C code.
+[00:09:59] This has the nice advantage of being correct by construction, right. If you don't have any bugs in your program, ipso facto the attacker cannot take advantage of any bugs.
+[00:10:06] That's on the professor, I get paid to think about something deeply like that. Now, this of course, is easier said than done.
+[00:10:13] Right? There's a couple of very straightforward things that programmers can do to practice good security hygiene. So, for example, functions like this gets function, right?
+[00:10:21] These are kind of like go-tos, these are now known to be bad ideas. Right? So, when you compile your code, and you include functions
+[00:10:27] like this-- if you're using a modern compiler, GCC, Visual Studio, whatever, it will actually complain about that.
+[00:10:33] It'll say, hey, you're one of these unsafe functions. Consider using [? FGADS ?], or using a version of [INAUDIBLE] that actually
+[00:10:39] can track the bounds of things. So, that's one simple thing that programmers can do. But note that a lot of applications
+[00:10:45] actually manipulate buffers without necessarily calling one of these functions. Right? This is very common in network servers, things like that.
+[00:10:52] They'll define their own custom parsing routines, then make sure that things are extracted from the buffers in the way that they want. So, just restricting yourself to these types of things
+[00:10:59] won't solve the problem completely. So, another thing that makes this approach difficult
+[00:11:07] is that it's not always obvious what is a bug in a C program. So, if you've ever worked on a very large scale system that's
+[00:11:14] been written in C, you'll know that it can be tricky if you've got some function definition that takes then
+[00:11:20] 18 void star pointers. I mean, only Zeus knows what all those things mean, right? And so it's much more difficult in a language like C,
+[00:11:27] that has weak typing and things like that, to actually understand as a programmer what it means to have a bug, and what
+[00:11:33] it means to not have a bug. OK? So, in general, one of the main themes that you'll see in this class is that C is probably
+[00:11:39] the spawn of the devil, right? And we use it because, once again, we typically want to be to be fast, right?
+[00:11:46] But as hardware gets faster and as we get more and better languages to write large-scale systems code,
+[00:11:51] we'll see that maybe it doesn't always make sense to write your stuff in C. Even if you think it has to be fast.
+[00:11:58] So, we'll discuss some of that later and later lectures. So, that's one approach, avoiding bugs
+[00:12:03] in the first place. So, another approach-- is to build tools that
+[00:12:15] allow programmers to find bugs.
+[00:12:26] And so an example of this is something that's called static analysis. Now we'll talk a little bit more about static analysis
+[00:12:33] in later lectures, but suffice it to say that static analysis is a way of analyzing the source
+[00:12:38] code of your program before it even runs and looking for potential problems. So, imagine that you have a function like this.
+[00:12:46] So, the [INAUDIBLE] foo function, it takes in a pointer.
+[00:12:52] Let's say it declares an integer offset value.
+[00:12:59] It declares another pointer and adds the offset
+[00:13:10] to that pointer. Now, even just at this moment in the code, right, static analysis can tell you
+[00:13:15] that this offset variable is un-initialized. Right? So, essentially you can do things like saying,
+[00:13:20] is there any way, is there any control floating through this program by which offset could have been
+[00:13:26] initialized before it was actually used this in this calculation here. Now, in this example it is very simple to see the answer is no.
+[00:13:32] Right? You can imagine that if there were more branches, or things like this, it would be more difficult to tell. But one thing that a static analysis tool can tell you,
+[00:13:39] and in fact, one thing that [? popular ?] compilers will tell you, is you'll compile this, and it'll say, hey buddy, this has not been initialized.
+[00:13:45] Are you sure, is this what you want to do? So, that's one very simple example of static analysis. Another example of what you can do is, let's say after this,
+[00:13:53] we have a branch condition here.
+[00:14:02] Right? So, you say, if the offset is greater than eight, then we'll call some function bar, and passing the offset.
+[00:14:12] Now, one thing you can note about this is that this branch condition here actually tells us
+[00:14:17] something about what the value of offset is. Right? Ignoring the fact that it wasn't initialized ,
+[00:14:22] we do know that once we get here, we know the offset actually has to be greater than eight. So, in some cases, what we can do
+[00:14:28] is actually propagate that constraint, that notion that the offset must be greater than eight,
+[00:14:33] into our analysis of bar. Right? So, when we start statically analyzing bar, we know that offset can only take certain values.
+[00:14:40] So, once again, this is a very high-level introduction to static analysis, and we'll discuss it more in later lectures. But this is a basic intuition of how
+[00:14:46] we might be able to detect some types of bugs without even executing your code. So, does that all makes sense?
+[00:14:52] So, another thing you can think about doing too
+[00:14:57] is what they call program fuzzing. So, the idea behind program fuzzing
+[00:15:04] is that essentially you take all of the functions in your code, and then essentially throw random values for input
+[00:15:10] to those functions. And so the idea is that you want to have high code coverage for all of your tests.
+[00:15:17] So, if you go out in the real world, typically when you check in unit test, you can't just do things like, I tried values two, four, eight,
+[00:15:24] and 15, because 15 is an odd number, so I probably tested all the branches right. What you actually have to do is you have to look at things like, like I said how many branches
+[00:15:31] in the program overall were actually touched by your test code, right? Because that's typically where the bugs hide.
+[00:15:38] The programmers don't think about the corner cases, and so as a result, they do have some unit tests that pass. They even have bigger tests that pass.
+[00:15:44] But they're not actually pinning all the corner cases in the program. So, static analysis can actually help with this fuzzing here.
+[00:15:50] Once again, using things like this notion of constraint. So, for example, in this program here, we have this branch condition here that specified the offset
+[00:15:58] being greater than eight. So, we can know what that offset is statically. So, we can make sure that if we're automatically generating
+[00:16:03] fuzzed inputs, we can ensure that one of those inputs hopefully will ensure that, somehow, offset is
+[00:16:10] less than eight, one will ensure that offset's equal to eight, one will ensure that it's greater than eight.
+[00:16:15] So, does that all make sense? Cool. So, that's the basic idea behind the notion of building tools
+[00:16:22] to help programmers find bugs. So, the nice thing is that even partial analysis can
+[00:16:29] be very, very useful, particularly when you're dealing with C. A lot of these tools that we'll discuss, to prevent against things like buffer
+[00:16:35] overflow or initialized variables, they can't catch all the problems. Right? But they can actually give us forward progress towards making
+[00:16:42] these programs more secure. Now, of course, the disadvantage of these things is that they're not complete.
+[00:16:48] Forward progress is not complete progress. And so it's still a very active area of research of how you defend against security exploits in C
+[00:16:56] and just in programs in general. So, those were two approaches to deal with defending
+[00:17:03] against buffer overflow. There's actually some other approaches. So, a third approach you might think about using
+[00:17:13] is the use [INAUDIBLE].
+[00:17:21] And so examples of these are things like Python, Java, C#--
+[00:17:36] I'm not going to put up Pearl there because people who use Pearl are bad people. So you can use a memory-safe language like that.
+[00:17:43] And this is to a certain extent seems like the most obvious thing that you could do. I just told you over there that basically C
+[00:17:51] is high-level assembly code, and it exposes raw pointers and does all these things that you don't want it to do,
+[00:17:56] and it doesn't do things you do want it to do, like [INAUDIBLE]. So, why not just use one of these high level languages? Well, there's a couple reasons for that.
+[00:18:03] So, first of all, there's actually a lot of legacy code
+[00:18:09] that's out there. Right?
+[00:18:15] So, it's all fine and dandy if you want go out and start your new project and you want to write it in one of these really safe languages.
+[00:18:20] But what if you've been given this big binary or this big source code distribution that's been written in C, it's been maintained for 10, 15 years,
+[00:18:27] it's been this generational project, I mean our children's children will be working on it. You can't just say, I'm just going to write everything in C#
+[00:18:33] and change the world. Right? And this isn't just a problem in C, for example. There's actually systems that you
+[00:18:38] use that you should be afraid, because they actually use Fortran and COBOL code. What?
+[00:18:44] That's stuff from the Civil War. So, why does that happen? Once again, the reason why it happens
+[00:18:49] is because as engineers, we kind of want to think, oh, we can just build everything ourselves, it'll be awesome, it'll be just the way that I want it,
+[00:18:55] I'll call my variables the things that I want. When in world, that doesn't happen. Right? You show up on your job, and you have this thing that exists,
+[00:19:02] and you look at the code base, and you say, well, why doesn't it do this? And then you say, listen.
+[00:19:07] We'll deal with that in V2. But for now, you got to make things work because the customers are taking away their money.
+[00:19:13] So, there's basically this huge issue of legacy code here, and how do we deal with it? And as you'll see the with the baggy bounds system,
+[00:19:20] One of the advantages of it is that it actually inter-operates quite well with this legacy code.
+[00:19:25] So, anyway, this is one reason why you can't just necessarily make all these buffer overflow problems go away by using one of these memory-safe languages.
+[00:19:33] So, another challenges is that what if you need
+[00:19:39] low-level access to hardware?
+[00:19:48] This might happen if you're writing something like a device driver or something like that. So, in that case, you really do need
+[00:19:56] that the benefits that C gives you in terms of being able to look at registers and actually understand a little of [INAUDIBLE] and things like that.
+[00:20:04] There's another thing too, which people always bring up and which I've alluded to before, but it's performance.
+[00:20:12] Right? So, if you care about performance, typically the thing that you're told is you've got to write in C, otherwise
+[00:20:17] you're just going to be so slow, you're going to get laughed out of code academy or whatever. Now, this is increasingly less of an issue.
+[00:20:24] Like the perf stuff. Because people have actually gotten very good with doing things like making better compilers
+[00:20:30] that have all kinds of powerful optimizations. And also, there are these things called Gits which actually really reduce
+[00:20:36] the cost of using these memory-safe languages. So, have you guys heard of Gits before? So, I'll give you a very brief introduction to what it is.
+[00:20:43] The idea is that, think about a language like Java, or JavaScript. It's very high level, it's dynamically tight,
+[00:20:50] right, it has automatic heat management, things like that. So, typically, when these languages first came out,
+[00:20:58] they were always interpreted. Right? And by interpreted I mean they didn't actually execute raw x86 instructions.
+[00:21:04] Instead, these languages were compiled down to some type of intermediate form. You may have heard of things like the JVM, the Java Virtual
+[00:21:11] Machine byte code, things like that. Right? You basically had a program that sat in a loop and took these byte codes, and basically
+[00:21:18] executed the high level instruction that was encoded in that byte code. So, for example, some of the JVM byte codes
+[00:21:24] dealt with things like pushing and popping things up on the stack. So, you have a program that would go through a loop,
+[00:21:31] operate that stack, and simulate those operations. OK. So, that all seemed fine and dandy, but once
+[00:21:36] again, all of the speed freaks out there were like, what about the perf? This too slow. You've got sort of that interpreter
+[00:21:42] sitting in that loop, and getting in the way of our bare metal performance. So, what people started to do is actually take these high level
+[00:21:50] interpreter languages and dynamically generate X86 code for them on the fly.
+[00:21:55] Right? So, in terms of just in time compilation, that means I take your snippet of JavaScript,
+[00:22:00] I take your snippet of Java whatever, and I actually spend a little bit of time upfront
+[00:22:06] to create actual raw machine instructions. Raw x86 that will run directly on the bare metal.
+[00:22:12] So, I take that initial performance hit for the Git compilation, but then after that, my program actually
+[00:22:17] does run on the raw hard drive. Right? So, things like the perf argument are not necessarily as compelling
+[00:22:23] as they used to be, because of stuff like this. There's also some crazy stuff out there, like ASN.js.
+[00:22:29] So, we can talk more about this offline if you actually are a JavaScript packer. But there are actually some neat tricks
+[00:22:34] that you can do, like compiling down JavaScript to very restricted subset of the language that
+[00:22:39] only operates on arrays. Right, so what this allows you to do is actually get rid of a lot of the dynamic typing overhead in standard
+[00:22:46] JavaScript, and you can actually get JavaScript code now to run within 2x of raw C or C++ performance.
+[00:22:54] 2x might sound like a lot, but it used to be things like 10x or 20z. So, we're actually making a lot of progress on that front.
+[00:23:01] And so the other thing to keep in mind with performance,
+[00:23:06] too, is that a lot of times, you don't need performance as much you might think that you do. Right? So, think about it like this.
+[00:23:12] Let's say that your program is actually IO bound. So, it's not CPU bound. In other words, let's say that your program
+[00:23:18] spends most of its time waiting for network input, waiting for disk input, waiting for user input, things like that.
+[00:23:24] In those types of cases, you don't actually need to have blazing fast raw compute speed. Right?
+[00:23:29] Because your program actually isn't spending a lot of time doing that kind of stuff. So, once again, this perf argument here,
+[00:23:35] you've got to take this stuff with a grain of salt. And I actually see a lot students who struggle with this. So, for example, I'll ask someone
+[00:23:41] to go out and write me a very simple program to parse a text file. So, they spend all this time trying to get this to work in C
+[00:23:47] or C++ and it's super fast and uses the templates and all that kind of stuff. But it's like a one line solution in Python.
+[00:23:53] And it essentially runs just as fast. And you could develop it much, much easier. So, you just have to take these perf arguments
+[00:23:59] with a grain of salt. So, anyway, we've discussed the three ways you can possibly
+[00:24:06] avoid buffer overflow. So, just avoid bugs in the first place. LOL, that's difficult to do. Approach two, you can build tools to help
+[00:24:13] you discover those bugs. Then approach three is, in a certain sense, you can push those tools into the runtime.
+[00:24:19] You can actually hopefully rely on some of their language runtime features to prevent you from seeing raw memory
+[00:24:24] addresses. And you can do things like balance checking, and so on and so forth. Once again, as we discussed before,
+[00:24:32] there's a lot of legacy C and C++ code out there. So, it's difficult to apply some of these techniques,
+[00:24:38] particularly number two and number three, if you've got to deal with that legacy code. So, how can we do buffer overflow mitigation
+[00:24:47] despite all these challenges? Besides just, you know, dropping out of computer science classes
+[00:24:53] and becoming a painter, or something like that. So, what actually is going on in a buffer overflow?
+[00:24:59] So, in a buffer overflow the attacker exploits two things.
+[00:25:11] So, the first thing that the attack is going to exploit is gaining control over the instruction pointer.
+[00:25:29] Right? And by this, I mean that somehow, the attacker figures out someplace in the code
+[00:25:36] that it can make the program jump to against the program's will. Now, this is necessary but insufficient for an attack
+[00:25:43] typically to happen. Because the other thing that the attacker needs to do
+[00:25:48] is basically make that pointer point to malicious code.
+[00:26:08] Right? So, how are we going to basically make the hijacked IP, instruction pointer, point to something
+[00:26:14] that does something useful for the attacker. So, what's interesting is that in many cases,
+[00:26:20] it's often fairly straightforward for the attacker to put some interesting code in a memory.
+[00:26:26] So we looked at some of those shell code attacks in the last lecture, where you can actually embed that attack code in a string.
+[00:26:32] As we'll discuss a little bit today and more in the next lecture, you can actually take advantage of some of the pre-existing code
+[00:26:38] the application has and jump to in an unexpected way to make some evil things happen.
+[00:26:43] So, typically, figuring out what code the attacker wants to run, maybe that's not as challenging as actually
+[00:26:49] being able to force the program to jump to that location in memory.
+[00:26:56] And the reason why that's tricky is because, basically, the attacker has to know in some way
+[00:27:03] where it should jump to. Right? So, as we'll see in a second, and as you actually saw in the last lecture, a lot of these shell code attacks
+[00:27:09] actually take advantage of these hard-coded locations in memory where the instruction pointer needs to get sent to.
+[00:27:16] So, some of the defenses that we're about to look at can actually randomize things in terms of code layout, heap
+[00:27:21] layout, and make it a little difficult for the attacker to figure out where things are located.
+[00:27:27] So, let's look at one simple mitigation approach first.
+[00:27:33] So, this is the idea of stack canaries.
+[00:27:42] So, the basic idea behind stack canaries is that, during a buffer overflow,
+[00:27:48] it's actually OK if we allow the attacker to overwrite the return address if we can actually
+[00:27:56] catch that overwrite before we actually jump to the place that the attacker wants us to go.
+[00:28:02] So, basically, here's how it works. Let's return to Neal stack diagram.
+[00:28:11] Essentially we have to think of it as a magic value. Basically, in front of the return address.
+[00:28:20] Such that any overflow would have to hit the canary first, and then hit the return address.
+[00:28:25] And if we can check that canary before we return from the function, then we can detect the evil. So, let's say that, once again, we've got the buffer here.
+[00:28:44] Then we're going to put the canary here.
+[00:28:53] And then this will be the save value of the break pointer.
+[00:28:59] And then this will be the return address.
+[00:29:09] So, once again, remember the overflow goes this way. So the idea is that if the overflow wants
+[00:29:16] to get to that return address, it first has to trample on this canary thing here, right?
+[00:29:22] You have a question? AUDIENCE: Why does it have to touch the canary? PROFESSOR: Well, because-- assuming
+[00:29:29] that the attacker doesn't know how to jump around in memory arbitrarily-- the way
+[00:29:34] that tradionally [INAUDIBLE] overflow attacks work is that you look in GB, figure out where all this stuff is.
+[00:29:42] And then, you essentially have this string, [INAUDIBLE] radius grows this way. Now, you're correct that if the attacker could just
+[00:29:49] go here directly, then all the bets are off. But in the very simple overflow approach,
+[00:29:54] everything just has to grow strictly that way. So the basic idea behind the canary
+[00:30:00] is that we allow the buffer overflow exploit to take place. But then we have run time code that,
+[00:30:06] at the time of the return from the function, is going to check this canary and make sure that it has the right value.
+[00:30:12] Right? So it's called the canary because back in the days, when PETA wasn't around, you could use birds to test for evil things.
+[00:30:18] So that's why it's called canary. AUDIENCE: My question is if the attacker is
+[00:30:24] able to overwrite the return address, and modify the canary,
+[00:30:31] how does he check that the canary was not modified, but was going to be performed?
+[00:30:37] So the attacker overwrites the return address, right? So how is the check that the canary was modified--
+[00:30:47] PROFESSOR: Yeah. So basically, you have to have some piece of code that will actually check this before the return takes place.
+[00:30:54] So in other words, you're right. There has to be that order in there. So essentially, what you have to do
+[00:31:00] is you have to have a support from the compiler here that will actually extend the calling convention,
+[00:31:07] if you will. Such that part of the return sequence is before we actually treat this value as valid,
+[00:31:13] make sure this guy hasn't been trampled. Then, and only then, can we think of going somewhere else. AUDIENCE: I think I might be jumping the gun here,
+[00:31:20] but doesn't this assume that the attacker can't find out or guess what the canary value is? PROFESSOR: That, in fact, is the very next thing my lecture is.
+[00:31:27] If I had prizes, you'd get one. I don't have any. But good for you. Gold star. That's exactly correct. So one of the next things I'd like to say
+[00:31:35] is what's the problem with this scheme? What if, for example, on every program, we always put the value a?
+[00:31:41] Just like four values of a. So this is like a single [INAUDIBLE] at work, right? Then you'd have that exact problem
+[00:31:47] that you just mentioned. Because then, the attacker-- this gets back to your question-- he or she knows how big this is.
+[00:31:54] This is deterministic on every system. So you just make sure that your buffer overflow has a bunch of a's here, and then you overwrite this side.
+[00:32:01] So you're exactly right about that. And so there's basically different types of values you could put between this canary to try to prevent that.
+[00:32:08] One thing that you can do here is you can use-- this is sort of a very funny type of canary,
+[00:32:18] but it basically exploits the ways that a lot of C progams and C functions
+[00:32:27] handle special characters. So imagine that you used this value for the canary. So the binary value is 0, which is like the null byte,
+[00:32:34] the null character in ASCII. Carriage return line feed, and then the negative 1.
+[00:32:41] What's funny about this is that a lot of the functions that you can exploit-- that manipulate strings, for example--
+[00:32:47] they will stop when they encounter one of these words, or one of these values. So you can imagine that you're using some string manipulation
+[00:32:54] function to go up this way. It's going to hit that null character. Oops-- it's going to stop processing. Right?
+[00:32:59] Or maybe if you're using a line-oriented function-- carriage return, line feed-- that's often used as the line terminator.
+[00:33:05] So once again, you're using that dangerous function that's trying to go this way. It hits that. Oops, it's going to quit.
+[00:33:11] And the negative 1 is another similar magic token. So that's one way you can get around that. One second.
+[00:33:17] And then another thing you can do is you can use a randomized value.
+[00:33:22] So here, you just [INAUDIBLE] from this whole idea
+[00:33:29] of trying to figure out what exactly it is that might cause that attack to terminate. And you just pull some random number
+[00:33:35] and either make it difficult for the attacker to guess what that is. Now, of course, this random value-- its strength
+[00:33:42] is basically based on how difficult it is for the attacker to guess that. So the attacker, for example, can
+[00:33:48] understand that if there's only, let's say, three bits of entropy in your system, then maybe the attacker
+[00:33:54] could use some type of forced attack, so on and so forth. So one thing to keep in mind, in general, is that whenever someone tells you,
+[00:34:00] here's a randomized offense against attack foo, if there are not a lot of random bits there, that attack may not give you as much defense
+[00:34:07] as you think. You had a question? AUDIENCE: Usually what tends to happen
+[00:34:14] is you read from another buffer and you write into that buffer on the stack. So in that situation, it seems like that promiscuous canary
+[00:34:22] is kind of useless. Because if I read from the [INAUDIBLE], I know what the canary is. And I have this other buffer that I control.
+[00:34:28] And I never check. And in that buffer, I can put as much of it as I want. I don't want the promiscuous canary,
+[00:34:34] so I can overwrite it very safely. So I don't see how this really works,
+[00:34:39] and in what scenario it's-- you're assuming you're reading from the buffer on this stack and you're going to stop-- PROFESSOR: Well, we're assuming--
+[00:34:45] we're writing to the buffer. So basically, the idea is that you write some [? two-long ?]
+[00:34:51] string this way. And then the idea is that if you can't guess what this is, then
+[00:34:56] you can't, basically, put this value inside of your overflow
+[00:35:02] string. AUDIENCE: But you said it's deterministic, right? 0, CR, LF, negative 1. PROFESSOR: Oh, yeah.
+[00:35:07] Right. OK. So I think I understand your question now. Yes. If you use this system here, with the deterministic canary,
+[00:35:16] and you essentially are not using one of these functions from, let's say,
+[00:35:21] the standard library that would be fooled by this, then, yeah, you can defeat the system that way.
+[00:35:27] AUDIENCE: But I can use string CPIs and the destination can be buffered. And the source can be [INAUDIBLE].
+[00:35:35] And that would not protect me against that.
+[00:35:40] PROFESSOR: I'm not sure I understand the attack, so. AUDIENCE: So the string CPI would take home the user input for my data, would overwrite canary-- oh,
+[00:35:50] and you're saying-- hmm, actually, I understand what you're saying. PROFESSOR: Right? Because the idea is that you can fill this buffer with bytes
+[00:35:56] from wherever, right? But the idea is that unless you can guess this, then it doesn't matter.
+[00:36:02] But you're correct. In general, anything that allows you to guess this or randomly get that value correct will lead to the feed of the system.
+[00:36:11] AUDIENCE: In terms of [INAUDIBLE], can you just take something like the number of seconds or milliseconds since the epoch and use
+[00:36:19] that at the [INAUDIBLE]? PROFESSOR: Well, as it turns out,
+[00:36:24] a lot of times, calls that get [INAUDIBLE] don't contain as much randomness as you might think.
+[00:36:30] Because the program itself might somehow-- let's say, for example, have a log statement or function you
+[00:36:36] could call to get the time that the program was launched or things like that. But you're right. In practice, if you can use something like,
+[00:36:42] let's say, the hardware system plot, which is often the lowest level, better system of timing of it-- yes, that kind of thing
+[00:36:49] might work. AUDIENCE: But even if you can pull the logs, it still depends on exactly what time you refuse a request.
+[00:36:56] And so if you don't have control over how long it takes for your requests to get from your computer to the server,
+[00:37:03] then I don't think you can deterministically guess exactly the right time. PROFESSOR: That's right. That's right.
+[00:37:09] The devil's in the details with all this kind of stuff. In other words, if there's some way for you to figure out,
+[00:37:14] for example, that type of timing channel, you might find out that the amount of entropy-- the amount of randomness-- is not, let's say,
+[00:37:20] the full size of a timestamp, but maybe something that's much smaller. Because maybe the attacker can figure out the hour and the minute in which you
+[00:37:26] did this, but not the second, for example. We'll take one more question, then we'll move on.
+[00:37:33] AUDIENCE: For the record, trying to roll your own randomness is usually a bad idea, right? PROFESSOR: That's correct.
+[00:37:38] AUDIENCE: Usually, you should just use whatever's supplied by your systems. PROFESSOR: Oh, yes. That's very true. It's like inventing your own cryptosystem, which
+[00:37:44] is another popular thing undergrads sometimes want to do. We're not the NSA, we're not mathematicians. That typically fails.
+[00:37:50] So you're exactly right about that. But even if you use system-supplied randomness, you still may end up with fewer bits of entropy
+[00:37:57] than you expect. And I'll give you an example of that when we talk about address phase randomization. So that's basically how the stack canary approach works.
+[00:38:07] And so since we're in a security class, you might be wondering, so what kinds of things will stack canaries not catch?
+[00:38:17] So when do canaries fail?
+[00:38:28] One way they can fail is if the attacker
+[00:38:35] the things, like function pointers.
+[00:38:45] Because if function pointers get [INAUDIBLE], there's nothing that the canary can do to prevent that type of exploit from taking place.
+[00:38:52] For example, let's say you have code that declared a pointer.
+[00:38:57] It gets initialized in some way, it doesn't really matter.
+[00:39:05] Then you have a buffer here.
+[00:39:11] Once again, the gets function rears its ugly head.
+[00:39:17] And then, let's say, down here, we assign some value 5
+[00:39:25] for the pointer. Now note that we haven't actually tried to attack the return address of the function that
+[00:39:32] contains this code. When we view the buffer overflow, this pointer address up here is going to get corrupted.
+[00:39:40] And so what ends up happening is that if the attacker can corrupt that pointer, then the attacker's
+[00:39:46] able to write 5 to some attacker-controlled address. Does everyone see how the canary doesn't help here?
+[00:39:53] Because we're basically not attacking the way that the function returns. AUDIENCE: But won't the pointer be below the buffer?
+[00:40:01] PROFESSOR: So, yeah.
+[00:40:06] AUDIENCE: Not necessarily-- PROFESSOR: So you're worried about, is it going to be here, or is it going to be here? AUDIENCE: I'm worried about when you--
+[00:40:11] will you actually be able to access where the pointer is when you're overturning-- PROFESSOR: Ah, yeah. So you can't necessarily-- that's a good question.
+[00:40:17] So I think, in a lot of the previous examples, you've been assuming that this guy would be here.
+[00:40:23] Like, in the [INAUDIBLE]. If the stack is going this way, then the pointer would be down here. But the order of the particular variables--
+[00:40:30] it depends on a bunch of different things. It depends on the way that the compiler lays stuff out. It depends on the column dimension of the hardware,
+[00:40:36] so on and so forth. But you're right that if the-- basically,
+[00:40:41] if the buffer overflow was going this way, but the pointer was in front of the buffer, then it's going to work.
+[00:40:48] AUDIENCE: Why can't you associate a canary with the function canary, just like you did with the return address?
+[00:40:53] PROFESSOR: Ah. That's an interesting point. You could do those things. In fact, you could try to imagine a compiler
+[00:40:59] that, whenever it had any pointer whatsoever, it would always try to add padding for various things.
+[00:41:05] Right? As it turns out, it seems like that will quickly get expensive, in terms of all the code that's
+[00:41:12] added, to have to check for all those types of things. Because then you could imagine that every single time you
+[00:41:18] want to invoke any pointer, or recall any function, you've got to have this code that's going to check whether that canary is correct.
+[00:41:24] But yeah, in principle, you could do something like that. So does this make sense?
+[00:41:30] So we see that canaries don't help you on this equation.
+[00:41:36] And so another thing, as we've discussed before, is that if you can guess the randomness, then, basically,
+[00:41:46] the random canaries don't work.
+[00:41:57] Producing secure sources of randomness is actually a topic in and of itself.
+[00:42:03] That's very, very complicated, so we're not going to go into great depth about that here. But suffice it to say, if you can guess the randomness,
+[00:42:08] everything falls apart. AUDIENCE: So do canaries usually have less bits than the return address? Because otherwise, couldn't you just
+[00:42:13] memorize the return address and check that the address changed? PROFESSOR: Let's see. So you're saying if the canary here is, let's say,
+[00:42:23] smaller than-- AUDIENCE: I'm saying for the canary is that you know
+[00:42:28] what that value is [INAUDIBLE]. Can't you also memorize the return address value
+[00:42:34] and check if that's been changed? PROFESSOR: Oh, so you're saying can't the secure system--
+[00:42:40] can't it look at the return address and figure out if that's been changed. Yeah.
+[00:42:46] In other words, if there-- well, yes and no. Note that there's still this that's
+[00:42:51] going get overwritten in the buffer overflow attack. So this may still cause problems. But in principle, if somehow these things
+[00:42:59] were invariant somehow, then you could do something like that. But the problem is that, in many cases,
+[00:43:07] this return-- the bookkeeping overhead for that would be a little bit tricky. Because you can imagine that particular function
+[00:43:13] may be called from places, and so on and so forth. Just in the interest of time, we're going to zoom forward a little bit.
+[00:43:19] But if we have time at the end, we'll come back to some of these questions.
+[00:43:25] So those are some situations in which the canary can fail. There's some other places in which it can fail, too.
+[00:43:32] For example, one way that it might fail is with malloc and free attacks.
+[00:43:38] This is a uniquely C-style attack.
+[00:43:44] Let's see what happens here.
+[00:43:49] Imagine that you have two pointers here, p and q.
+[00:43:59] And then imagine that we issue a malloc for both of these.
+[00:44:08] We give p 1,024 bytes of memory. We also give q 1,024 bytes of memory.
+[00:44:15] And then, let's say that we do a strcpy on p
+[00:44:29] from some bug that's controlled by the attacker. So here's where the overflow happens.
+[00:44:35] And then let's say that would be free q
+[00:44:43] and then let's say that would be free p. OK. So it's fairly straightforward code, right?
+[00:44:50] Two pointers-- malloc's the memory for each one of them. You use one of these on site functions,
+[00:44:55] the buffer overflow happens, and we free q and we free p.
+[00:45:03] Let's assume that p and q-- the memory that's
+[00:45:12] assigned to them-- are nearby, in terms of the layout in terms
+[00:45:22] of [INAUDIBLE]. So both of these objects line next to each other
+[00:45:27] in the memory space. There's some subtle and evil things that can happen, right?
+[00:45:34] Because this third copy here might actually over--
+[00:45:39] it'll fill p with a bunch of stuff, but it might also corrupt some of the state that belongs to q.
+[00:45:47] OK? And this can cause problems. And some of you may have done things in this unintentionally in your own code, when
+[00:45:52] you have some type of weird use of pointers. And then stuff seems to work, but when you call free later on, it segfaults
+[00:45:58] or something like that. Right? What I'm going to talk about here is the way that the attacker can take advantage of that behavior.
+[00:46:04] We're actually going to explain why that happens. So imagine that inside the implementation
+[00:46:12] of free and malloc, an allocated block looks like this.
+[00:46:21] So let's say that there is the app-visible data that lives up
+[00:46:29] here. And then let's say you had a size variable down here.
+[00:46:35] This is not something that the application sees directly. This is like some bookkeeping info that the free or the malloc systems
+[00:46:43] attract so that you know the sizes of the buffer that it allocated. Let's say that free block has some metadata that
+[00:46:55] looks like this.
+[00:47:03] You've got the size of the free block here. And then you've got a bunch of empty space here.
+[00:47:09] Then let's say-- this is where things get interesting. You've got a backwards pointer and then
+[00:47:17] you've got a forward pointer.
+[00:47:25] And maybe you've got some size data here. Now why are we having these two pointers here? It's because the memory allocation
+[00:47:30] system, in this case, is using a doubly-linked list to track how the free blocks related to each other.
+[00:47:37] So when you allocate a free block, you take it off of this doubly-linked list. And then when you deallocate it, you do some pointer arithmetic,
+[00:47:45] and then you fix these things up. Then you add it back to that linked list, right? So as always, whenever you hear pointer arithmetic,
+[00:47:51] you should think it's your canary. Because that's where a lot of these problems come about. And so the thing to note is that we had this buffer overflow
+[00:48:01] here, the p. If we assume that p and q are next to each other, or very close in memory, then what can end up happening
+[00:48:08] is that this buffer overflow can overwrite some of this size data for the allocated pointer, q.
+[00:48:19] Is everybody with me so far? Because if you're with me so far, then basically, you can use your imagination at this point
+[00:48:24] and see where things go wrong. Because essentially, what's going to end up happening is that these free operations-- they
+[00:48:31] look at this metadata to do all kinds of pointer manipulations with this kind of stuff.
+[00:48:53] Somewhere in the implementation of free, it's going to get some pointer based
+[00:49:05] on the value of size, where size is something
+[00:49:11] the attacker controls. Because the attacker did the buffer overflow. Right? So then, you can imagine that it does
+[00:49:18] a bunch of pointer arithmetic.
+[00:49:25] So it's going to look at the back in the four pointers of this block.
+[00:49:33] And then it's going to do something like update the back pointer.
+[00:49:41] And also update the forward pointer.
+[00:49:49] And the exact specifics of this-- you don't need to worry about. This is just an example of the code that takes place in there.
+[00:49:55] But the point is that note that because the attacker's overwritten size, the attacker now
+[00:50:00] controls this pointer that's passed into the free code. And because of that, these two statements
+[00:50:06] here, these are actually pointer updates. Right? This is a pointer somewhere. And because the attacker has been able to control this p,
+[00:50:15] he actually controls all this stuff, too. This is where the attack can actually take place.
+[00:50:20] So when the free code operates and it tries to do things like, for example, merge these two blocks, that's typically why you have
+[00:50:27] [INAUDIBLE] doubly-linked list. Because if you have two blocks that are facing to each other and they're both free, you want to merge them to one big block.
+[00:50:33] Well, we control size. That means we control this whole process here. That means if we've been clever in how these overflows are
+[00:50:41] working, at these points, we can write to a memory in the way that we choose.
+[00:50:46] Does that make sense? And like I said, this type of thing often happens in your own code when you're not getting
+[00:50:52] very clever with pointer. When you make some mistake with the double freeing or whatever, this is why stuff will segfault sometimes.
+[00:50:59] Because you've messed up this metadata that lives with each one of these allocated blocks. And then at some point, this calculation
+[00:51:05] will point to some garbage value, and then you're dead. But if you're the attacker, you can actually choose that value
+[00:51:11] and use it for your own advantage.
+[00:51:17] OK. So now let's get to another approach
+[00:51:22] for getting rid of some of these buffer overflow attacks. And that approach is bounds checking.
+[00:51:38] The goal of bounds checking is to make sure
+[00:51:45] that when you use a particular pointer, it only refers to something that is a memory object.
+[00:51:54] And that pointer's in the valid bounds of that memory object. So that's the basic idea behind the idea.
+[00:52:00] It's actually pretty simple-- at a high level. Once again, in C, though, it's very difficult to actually understand things.
+[00:52:07] Like, what does it actually mean for a pointer to be in bounds or out of bounds, or valid or invalid? So for example, let's say that you have
+[00:52:13] two pieces of code like this. So you declare a character array of 1,024 bytes.
+[00:52:24] And then let's say that you use something like this. You declare a pointer, and then you'd
+[00:52:32] get the address of one of the elements in x.
+[00:52:38] Does this make sense? Is this a good idea to do that?
+[00:52:45] It's hard to say. If you're treating this x up here as a string, maybe it makes sense for Jim to take a pointer like this.
+[00:52:52] Then you can increment and decrement, because maybe you're looking for some special value of your character in there. But if this is a network message or something like that,
+[00:53:00] maybe there's actually some struct that's embedded in here. So it doesn't actually make sense
+[00:53:05] to walk this character by character, right? So the challenge here is that, once again, we can see it allows you to do whatever you want.
+[00:53:12] It's hard to determine what it is you actually want it to do. And so, as a result, it's a little bit
+[00:53:18] subtle with how you define things like pointer safety in C.
+[00:53:23] You can also imagine that life gets even more complicated if you use structs and unions.
+[00:53:30] Imagine you had a union. It would look like this. It's got some integer value in there.
+[00:53:38] And then you've got some struct. And then, it has two integers inside of it.
+[00:53:59] Don't forget the way that the unions work is that, basically, the union's going to allocate the maximum size
+[00:54:04] for the largest element. At any given moment, you typically expect that either this ni will be valid
+[00:54:11] or this struct s will be valid, but not both. So imagine that you had code that did something like this.
+[00:54:18] You get a pointer to address this guy.
+[00:54:33] So I get an integer pointer to the address of, in the union, this struct, and then k.
+[00:54:40] Well, this reference is strictly speaking in bounds.
+[00:54:45] There's memory that's been allocated for this. That's not incorrect. But are you actually, this moment in program of execution,
+[00:54:51] treating this union as one of these guys or one of these guys? It's hard to say.
+[00:54:58] So as a result of these ambiguous pointers semantics that can arise in these C programs, typically,
+[00:55:05] these bound checking approaches can only offer a weaker notion of pointer correctness.
+[00:55:12] And so that notion is as follows.
+[00:55:23] If you have a pointer p prime that's
+[00:55:32] derived from the base pointer p, then p prime
+[00:55:50] should only be used to deference memory that belongs
+[00:56:07] to the original base pointer.
+[00:56:17] So for a derived pointer p prime that's derived from some original p, then
+[00:56:23] p prime should only be used to deference memory that belongs to p. Know that this is a weaker goal than enforcing completely
+[00:56:31] correct pointer semantics. Because for example, you could still have weird issues like with this union here, for example.
+[00:56:41] Maybe at this particular point in the program, it wasn't correct for the program to be able to reference that particular value in the union.
+[00:56:49] But at least this pointer reference is imbalanced. So maybe-- like this example up here-- maybe this creation
+[00:56:59] of this pointer here violated the semantics of the network message embedded in x.
+[00:57:04] But at least you're not trampling on arbitrary memory. You're only trampling on the memory that belongs to you.
+[00:57:11] And so, in the world of C, this is considered success.
+[00:57:16] So that's the basic idea. Now, the challenge with enforcing these types of semantics here is that, in many cases,
+[00:57:24] you need help from the compiler. So you need help from the compiler. You typically need to recompile programs
+[00:57:30] to enforce these semantics. That can be a drag for backwards compatibility. But this is the basic notion of bounds checking.
+[00:57:38] What are some ways that you can implement bounds checking?
+[00:57:49] One very simple way is this notion called electric fencing.
+[00:58:01] The notion here is that, for every object that you allocate on the heap, you allocate a guard page that's
+[00:58:13] immediately next to it. And you set the page protection on that page, such that if anybody tries to touch that, you get a hard fault.
+[00:58:22] The hard rules say that's out of bounds, and then the program will stop right there. And so this is a very simple thing that you can do.
+[00:58:29] And what's nice about this approach actually, is that whenever you have an invalid memory reference,
+[00:58:34] this causes a fault immediately, right. If you've ever debugged the Base C or C++ program, one of the big problems is that a lot of times when you corrupt
+[00:58:41] memory, that memory is corrupted silently, and for a while, and it isn't until later that something crashes and then only
+[00:58:49] then you realize something happened. But you don't know what that something is. You simply do what they call heisenbugs, right.
+[00:58:54] Things that have this notion of uncertainty in them. So what's nice about this is that as soon as the pointer hits here, boom, it's a guard page,
+[00:59:00] everything blows up. Now can you think of a disadvantage with this approach?
+[00:59:06] AUDIENCE: It takes longer [INAUDIBLE]. PROFESSOR: Yeah exactly. So imagine that this little-- this key thing here
+[00:59:12] was super, super small, then I've allocated a whole page just to make sure that my little tiny thing here didn't get--
+[00:59:19] didn't have one of these pointer attacks. So this is very space intensive. And so-- but people don't really deploy something
+[00:59:25] like this in production. This could be useful for the bugging thing, but you would never do this for a real program.
+[00:59:32] So that make sense? So these electrical fences are actually pretty-- pretty simple to understand.
+[00:59:39] AUDIENCE: Why does that have to be so large, necessarily? PROFESSOR: Ah, so the reason is because this guard page here,
+[00:59:46] you're typically relying on the hardware, like page level protections to deal with those types of things.
+[00:59:52] And so there's like certain memory size you can set to the size of the page, according to [? Hollis ?]. But typically that page is 4k, for example.
+[00:59:58] So getting back to your question, this is some like super small value here, then yeah [INAUDIBLE] 2 bytes where
+[01:00:05] you got 4k here protecting it. AUDIENCE: In protecting [INAUDIBLE] individual
+[01:00:11] [INAUDIBLE]. PROFESSOR: Oh sorry yeah, yeah so by heap I mean like heap object. AUDIENCE: [INAUDIBLE].
+[01:00:16] PROFESSOR: Yeah thank you for-- yeah exactly. So imagine like for each malloc you do, you can have one of these-- and set the guard page for it.
+[01:00:22] AUDIENCE: And you do it for log and above? Or just above? PROFESSOR: You can do either. AUDIENCE: [INAUDIBLE]
+[01:00:28] PROFESSOR: That's right. AUDIENCE: [INAUDIBLE]. PROFESSOR: That's right, well you could do either.
+[01:00:33] The ones we have depending on this-- on the size of the object. I mean now you got to declare two guard fences, right.
+[01:00:40] So now this quickly gets out of control. Which yeah, you could have a booking [INAUDIBLE].
+[01:00:46] So that's the basic idea behind that.
+[01:00:58] And then another approach you can look at is what they call fat pointers.
+[01:01:07] And so the idea here is we actually
+[01:01:13] want to modify the pointer representation itself to include bounds information in it. So if you look at your regular 32-bit pointer what's it
+[01:01:27] look like? Well the answer is, 32-bits. And then you got [INAUDIBLE].
+[01:01:32] Right? If you look at a fat pointer then one
+[01:01:41] way you can think about looking at this is you got a 4 byte base.
+[01:01:46] And then you have a 4 byte end.
+[01:01:57] So in other words, this is where it would allocate out that it starts, that's where it ends and then you've got a 4 byte cur address.
+[01:02:09] So this is where the pointer actually
+[01:02:14] is, within that bounds, right. So basically what happens is that the compiler will generate
+[01:02:20] code, such that when you access these fat pointers this gets updated, but then it'll also check these two things
+[01:02:26] to make sure that nothing bad has happened during that upgrade. So for example you can imagine that if I had code like this.
+[01:02:42] So I have an end pointer and then I allocate 8 bytes.
+[01:02:47] So assuming that we're on a 32-bit architecture to point to 2 [INAUDIBLE].
+[01:02:53] And then I have some while loop that it
+[01:02:59] is going to just assign some value to the pointer and then
+[01:03:05] increment the pointer-- what you'll see
+[01:03:11] is that the current address for this pointer, like at this point in code, will point to the base, right.
+[01:03:18] And then every time we iterate through here, we can see that we're either checking a bound,
+[01:03:24] or incrementing a bound. So at this point we want to dereference it.
+[01:03:29] We can actually check and see, is the current address at that pointer, in this ring.
+[01:03:34] And if it's not you throw in an exception here and so on and so forth. So once again, where is this taking place?
+[01:03:41] This Is taking place in new code that the compiler generated. So one question that came up on the online discussion group,
+[01:03:48] some people were saying, well what if it's instrumented code, what does that mean, right? So when I say that the-- that the compiler generates
+[01:03:54] new code, imagine that there-- this is what you see as a programmer. But before this operation actually takes place,
+[01:04:02] imagine the compiler inserted some new C code here that basically looks at these base bounds here.
+[01:04:07] And then if there was something out of bounds it would then do an exit, or an abort, or something like that. So that's what it means to say that there
+[01:04:14] is instrumented code. It's that you take the source code, use the program of C, add some new C source code and then compile
+[01:04:20] that video program. So the basic idea I think behind the fat pointer is pretty simple.
+[01:04:26] There's some disadvantages to this. The biggest disadvantage is that, oh
+[01:04:32] my goodness look how big the pointers are now, right. And so what this means is that you can't just take a fat pointer and pass it to an unmodified,
+[01:04:40] off the shell library. Because it may have certain expectations that pointers are a certain size and we give you this thing,
+[01:04:46] it's just going to-- it's going to blow up. We also have trouble if you want to include these types of pointers and structs, or things like that.
+[01:04:52] Because that can actually change the size of the struct, right. So a very popular thing in C code to do
+[01:04:58] is to take like the size of the struct and then like do something as a result of that. Like reserve some disc space for a struct of that size,
+[01:05:04] and so on and so forth. So this causes all that stuff to blow up, right. Because once again, the pointers have gotten very, very big.
+[01:05:11] And another thing which is a bit subtle, but it's that these fat pointers typically
+[01:05:17] will not be able to be updated in an atomic fashion, right. So on 32-bit architectures typically,
+[01:05:24] if you do like a write to a 32-bit variable, that write is atomic, right. But now, these pointers are these three integer sized
+[01:05:33] things, right. So if you have any code that takes advantage of the fact that it expects pointer writes to be atomic,
+[01:05:39] then you may get in trouble, right. Because you can imagine that to do some of these checks,
+[01:05:45] you have to look at the current address and then look at this and then you might have to increment that, and so on and so forth.
+[01:05:51] So this can cause very subtle concurrency bugs if you have code that depends on that atomacy of fail [INAUDIBLE].
+[01:05:58] So does that all make sense? So that's one approach you can do. But kind of like electric fences, this
+[01:06:05] has some nasty side effects that means the people don't typically use that in practice.
+[01:06:10] So now we can start talking about bounds checking,
+[01:06:19] with respect to the shadow of the infrastructure that I mentioned in the baggy bounds paper.
+[01:06:25] So the basic idea for the shadow base structure
+[01:06:37] is for each object that you allocate,
+[01:06:43] you want to store how big the object is.
+[01:06:53] Right, so for example, if you have some pointer
+[01:06:58] that you call malloc on right, you need to store that size of that object there,
+[01:07:07] and then note that if you have some thing that's like a static variable like this, right,
+[01:07:15] the compiler can automatically figure out what the bounds are for that thing there, statically speaking.
+[01:07:21] So for each one of these pointers you need to interpose somehow on two operations.
+[01:07:31] Basically you do arithmetic.
+[01:07:36] So this is things like q equals p plus 7, or whatever.
+[01:07:49] And then you want to interpose on dereferencing.
+[01:07:55] So this is something like q equals
+[01:08:02] a or something like that. So what's interesting is that you might think,
+[01:08:09] well why can't we just rely on the reference when interposing stuff?
+[01:08:16] Why do we have to look at this point arithmetic here? But similarly you might wonder the other thing.
+[01:08:22] Like why can't you just deal with one of these non [INAUDIBLE] interpose [INAUDIBLE]? So you can't just signal an error
+[01:08:29] if you see the arithmetic going out of bounds because in c that may or may not be there.
+[01:08:37] So in other words, a very common medium is C and C++ is you might have a pointer that points to one pass the valid end
+[01:08:44] of an object right, and then you use that as a stop condition, right. So you iterate to the object and once you
+[01:08:49] hit that end pointer, that's when you actually stop the loop or whatever. So if we just interpose on arithmetic
+[01:08:56] and we always cause a hard fault, when we see a pointer go out of bounds, that may actually break a lot of legitimate applications, right.
+[01:09:04] So we can't just interpose on that. And so you might say, well why can't you just interpose
+[01:09:09] on the reference thing, and you just-- when we notice that you've cut something out of bounds, we'll just read there and there.
+[01:09:15] Well the challenge there is that how do you know it's out of bounds? Right, it's the-- it's the arithmetic in our positioning
+[01:09:21] that officially allows us to tell whether or not this thing's going to be legal here, right. Because it's the interpositioning
+[01:09:27] on the arithmetic that allows us to track where the pointer is with respect to it's original baseline.
+[01:09:34] So that's the basic idea there.
+[01:09:41] And so the next question is how do we actually implement the bounds checking?
+[01:09:49] Because basically we need some way to map a particular pointer
+[01:09:55] address to some type of bounds information for that pointer. And so a lot of your previous solutions
+[01:10:02] use things like, for example, like a hash table, or a tree, right that will allow you to do lookups right, and stay the gray.
+[01:10:08] So given a pointer address, I do some lookup in this data structure, figure out what the bounds are.
+[01:10:14] Given those bounds I can then figure out if I want to allow the action to take place or not. Now the problem with that is that it's a slow lookup,
+[01:10:21] right because these data structures you're thinking it's a tree, or you're going through a bunch of branches before you can actually hit the value potentially.
+[01:10:29] And even if it's a hash table where there's an overflow in the bucket you got to follow chains, or do you're code, or things like that.
+[01:10:36] So the baggy bounds paper that we are about to look at actually figured out
+[01:10:42] a very efficient data structure that tracked to these bounds, to make that bound checking very fat.
+[01:10:49] So let's just step into that right now. But before we go into that let me very briefly talk about how buddy allocation works.
+[01:10:55] Because that's one of the things that came up in a lot of the questions. So one thing you will see for these papers is that a lot
+[01:11:00] of times they are not self-contained, right. So they will mention things that they will assume that you know, but you may not know them.
+[01:11:07] Don't get discouraged by that. That happens to me too sometimes. These papers are written in a way they assume a lot of prior knowledge,
+[01:11:12] so don't get discouraged by that. Luckily we actually access to the internet we can look up some of that stuff. Can you imagine what happened in our parents time?
+[01:11:18] They just didn't understand stuff they just had to go home, right. So don't be afraid to look stuff up to get to Wikipedia
+[01:11:25] it's mostly correct. So how does-- how does the buddy allocation system work?
+[01:11:37] So basically what it does at first it treats unallocated memory as one big block.
+[01:11:44] OK. And then when you request a smaller block for dynamic allocation, it tries to split that address
+[01:11:51] base using powers of 2 until it finds a block that is just big enough to work.
+[01:11:57] So let's say a request came in and say A is going to equal to malloc 28.
+[01:12:06] 28 bytes. And let's just say this toy example is only 128 bytes of memory total. So the buddy allocator is going to look at this
+[01:12:13] and say, well I have 128 bytes of memory, but it's too wasteful to allocate this whole thing to this 28 byte request.
+[01:12:18] So I'm going to split this request in two and then see if I have smaller block that's just big enough.
+[01:12:24] So it's going to say, OK put this to 0 to 64 and 64 to 128. Ah OK, but this block here is still too big, right.
+[01:12:31] Basically what the buddy algorithm wants to do is find a block such that the allocated data in the real object, 28 bytes,
+[01:12:38] is at least half the size of that block. So buddy allocator says, OK this thing over here
+[01:12:44] is still too big. So what it's going to do is it's going to split the memory space again, right.
+[01:12:51] So from 0 to 32 and then it's going to say,
+[01:12:58] ah OK 28 bytes that is more than half the size of this block here. So now this block is going to be allocated to A. OK,
+[01:13:08] and so it gets this address here. Now let's say that we have another question comes in for B
+[01:13:17] and let's say we want to malloc 50 right.
+[01:13:23] So what's going to happen is that the buddy allocator will say, ah OK I actually have a block here
+[01:13:29] that's big enough, right. 50 Is greater than half the size of this thing so I'll just allocate that right there.
+[01:13:35] So we have this system, or setup, where we have A here,
+[01:13:41] and then we have B here, and then let's say we had another request that came in for 20 bytes.
+[01:13:51] This is actually pretty straightforward because we can put that right here, right.
+[01:13:57] So then you have something that looks like this.
+[01:14:03] Then what's interesting is that when you deallocate memory, if you have to deallocate a block that
+[01:14:09] are next to each other and are the same size, the buddy allocator will merge them into a block that's twice as big, right.
+[01:14:15] So if we had free let's say C then we go to this situation,
+[01:14:29] we can't do any merging, because this is the only possible block that this one could have been merged with.
+[01:14:35] It's the same size, but this things still occupied. So then if we do a free on A, then we
+[01:14:49] have this situation here. Right, where these two 32 byte blocks
+[01:14:56] were merged into one size 64, and that this one, a size 64 is still out there.
+[01:15:01] Right, so it's called the buddy system because once again, whenever you have two adjacent blocks that
+[01:15:06] are of the same size and that could be merged to form an aligned block,
+[01:15:11] then the system will merge that buddy with this other buddy and then create that new block that's twice as big.
+[01:15:18] So the thing that's nice about this system is that it's very simple to figure out where buddy's are.
+[01:15:26] Because you can do very cutesy arithmetic, like the buddy bounds system-- baggy bounds system works. But anyway I'm not going into details.
+[01:15:32] This is basically how buddy allocation works. Does that make sense? Right, and one question that came up
+[01:15:39] a lot in all my discussions, isn't this wasteful? Right, so for example, imagine that up here at the beginning
+[01:15:47] I had a request for size 65 bytes, right. So if I have a request for 65 bytes,
+[01:15:54] I would allocate this whole structure up here and then there's-- actually you're out of dynamic memory and can't do any
+[01:16:00] more allocations. And the answer is yes, that is wasteful. But once again, it's a trade off, right. Because it's very easy to do these calculations on how to do
+[01:16:07] merging and stuff like that. So if you want finer grain allocation, there are other valid ones for that. It's outside the scope of the lecture so,
+[01:16:13] we can buffer that offline if you want. That's basically how the buddy-- sorry the, the buddy allocator
+[01:16:19] works. So what is the baggy bounds system going to do?
+[01:16:26] Well, it is going through a y, on couple of tricks.
+[01:16:41] So the first idea is you round up each allocation
+[01:16:52] to a power of 2, and you align the request to that power of 2.
+[01:17:13] Right, so essentially the buddy allocators very nice because it handles a lot of that for you, right. It naturally will do that kind of thing.
+[01:17:18] Because that's just the way that it allocates and deallocates to memory.
+[01:17:23] And so the second thing that's going to happen, baggy bounds system, is you express each bound as log base
+[01:17:41] 2 of the allocation size.
+[01:17:48] Right, and so what this means-- and so why can we do this? Well once again all of our allocation sizes
+[01:17:53] are powers of 2, right. So we don't need very many bits to represent
+[01:17:59] how big a particular allocation size is. So for example, if your allocation size is 16,
+[01:18:10] then you just need four-- the log rhythm of that, 4 bits of the allocation size, right.
+[01:18:17] Does that make sense? Right, this another popular question here. This is why you only need small number of bits
+[01:18:23] here, because we're basically forcing the allocation sizes hit this quantized way that you grow.
+[01:18:30] Like if you could only have something, let's say 16 bytes or 32 bytes. You can't have for example, 33 bytes.
+[01:18:36] And then the third thing that baggy bounds is going to do
+[01:18:41] is store the limit info in a linear array 1 byte per entry
+[01:19:04] but we're going to allocate memory
+[01:19:12] at the granularity of a slot. Which in the paper they used 16 bytes as the slot width.
+[01:19:24] So for example, now this next one, this is 1 bit that wasn't actually specifically said in the paper which if you don't grasp
+[01:19:31] it'll make the paper very tricky to understand, right. So now you can have a slot size which is equal to 16,
+[01:19:40] so if you do p equals malloc 16 so what's going to happen?
+[01:19:48] So in this bounds table you're going to say take that pointer plot it by plot size it's
+[01:20:02] going to equal 4, right. So in that bounds table we're going to put the logarithm of the allocation size in the table.
+[01:20:11] Does that make sense? OK, now what the tricky thing is, let's say that you have something like this.
+[01:20:22] Right, so let's say that you out 32 bytes. What is the bounds table going to look like there?
+[01:20:29] So here we actually have to update the bounds table to abbreviate your p, or sorry t for the size you need.
+[01:20:37] But that fit the bounds table twice.
+[01:20:44] Right, once for the first slot memory that this allocation takes up. And then a second time for that second slot that it takes up.
+[01:20:56] Right, so once again 32 is the allocation size.
+[01:21:03] This is the log of that allocation size. So for the two slots that this memory takes up,
+[01:21:09] we're going to update the bounds table twice. Does that makes sense? Right, and this is really the key
+[01:21:15] that I think for a lot of people that's going to make the paper make sense or not make sense, right. Because that bounds table multiple times if any
+[01:21:21] outside the allocation. AUDIENCE: Can you repeat that for me again? PROFESSOR: Excuse me? AUDIENCE: Can you repeat that again? PROFESSOR: Oh yeah, yeah, sure, sure. So basically what the idea is that I
+[01:21:27] mean you've got this bounds table here and it's got a bunch of entries.
+[01:21:34] But it basically needs entries to cover all of p size, all the allocation size.
+[01:21:41] OK, so in this case it was very simple because basically this is just one slot, due to the size.
+[01:21:46] Here it's multiple slot sizes, right. So what's going to happen is that imagine then that we had a pointer that's moving in the range of p.
+[01:21:53] You have to have some of the back end table slot for each one of those places where p [INAUDIBLE],
+[01:21:58] right. And so it's this second piece that makes the paper a little bit confusing I think. But it doesn't really go into depth about that,
+[01:22:06] but this is how that works. OK so armed with the bounds table
+[01:22:20] stuff what happens if we have a C code that looks like this?
+[01:22:30] So you have a pointer, p-prime, you derive it from p,
+[01:22:36] we would add some variable i. So how do you get the size of the allocation belonging to p?
+[01:22:47] Well you look in the table using this lookup here.
+[01:23:05] Right, so the size of the data that's been allocated to p is going to be equal to 1 and then when you Left
+[01:23:11] Shift that by looking at the table, taking that pointer value, and then Right Shifting that
+[01:23:17] by the log of the table size. Right, if the arithmetic works out because of the way that we're binding
+[01:23:24] pointers to the table bounds, right. So this will get us-- this thing right here, will get us
+[01:23:32] the log of the sides. And then this thing over here basically expands that into like the regular value, right.
+[01:23:39] So for example, if the size of this pointer were 32, in terms of bytes we've allocated, right.
+[01:23:46] This is going to get us five when we look at the table, then when we Left Shift it this way, Left
+[01:23:52] Shift the one this way, then we're going to get 32 back again from here.
+[01:23:57] OK. And then we want to find the base of that pointer.
+[01:24:06] Take a pointer itself and then we're
+[01:24:14] going to and that with the side minus 1.
+[01:24:24] Now what this is going to do is, this is actually going to give us a mass, that you can think of it.
+[01:24:29] And that mass is going to allow us to recover the base here. So imagine that your size equals 16.
+[01:24:40] So 16 equals this in binary.
+[01:24:49] Right, there's a bunch of zeros off this way. So we've got a 1 here, we've got some zeros over here.
+[01:24:55] So if we look at the bit-wide inverse of 16 minus 1,
+[01:25:07] then-- actually sorry. So if we look at 16 minus 1, so what's that going to look like?
+[01:25:12] 60 minus 1 we're going to look like right, something
+[01:25:19] like this. OK. And if we take the inverse of that
+[01:25:26] what is that going to give us?
+[01:25:32] Right, in binary. So basically this thing here allows us to basically clear the bit that essentially would be offset
+[01:25:40] from that valid pointer and just give us the base of that pointer. OK.
+[01:25:46] And so once we've got this, then it's very simple to check whether this pointer's in bounds, right.
+[01:25:51] So we can basically just check whether p-prime is greater than or equal to base and whether p-prime
+[01:26:04] minus the base is less than size.
+[01:26:13] This is just a straightforward thing you do, right. Just seeing whether that derived pointer exists within the bounds of this [INAUDIBLE].
+[01:26:19] Right, so at this point things are pretty straightforward. Now they have like a optimized check in the paper, I'm not going to go into that detail.
+[01:26:25] But suffice it to say that all the binary arithmetic, it resolves down to the same thing. There's just some clever tricks there
+[01:26:31] to avoid some of the explicit calculations we do here. That's the basic idea.
+[01:26:36] And so the fifth trick that the baggy bounds system uses
+[01:26:49] is that it uses the virtual memory system to prevent out
+[01:26:59] of bounds [INAUDIBLE] right. So the idea here is that-- how much time
+[01:27:07] do we have by the way? Probably like zero? So the basic idea here is that if we
+[01:27:12] have a pointer [INAUDIBLE] here, that we detect is out of bounds, what we can do is actually set the high order
+[01:27:19] bit on a pointer, right. And by doing that we guarantee that pointer is dereferenced,
+[01:27:26] then the caging hardware's going to be [INAUDIBLE], we're going to throw a hard error, right. Now in and of itself, just setting
+[01:27:31] that bit does not cause a problem. It's only when you dereference that pointer that you get into problems.
+[01:27:37] OK?
