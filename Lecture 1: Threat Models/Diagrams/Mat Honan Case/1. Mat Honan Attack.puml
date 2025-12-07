@@ -1,0 +1,43 @@
+@startuml
+actor Attacker
+
+participant "Amazon\nWeb UI" as AmazonUI
+participant "Amazon\nAccount System" as Amazon
+participant "Apple Support\n(me.com/iCloud)" as Apple
+participant "Gmail\nAccount System" as Gmail
+participant "Mat's me.com\nMailbox" as MeCom
+
+== Step 1: Weaken Amazon ==
+Attacker -> AmazonUI: Start purchase w/ own credit card\n(no strong auth)
+AmazonUI -> Amazon: Add new card to Mat's account
+Amazon --> AmazonUI: Card added (Attacker's card on file)
+
+== Step 2: Reset Amazon Password ==
+Attacker -> AmazonUI: Request password reset
+AmazonUI -> Amazon: Verify w/ any card on file\n(Attacker's card suffices)
+Amazon --> AmazonUI: Allow password reset
+Attacker -> AmazonUI: Set new Amazon password
+
+== Step 3: Learn Last 4 Digits ==
+Attacker -> AmazonUI: Log into Mat's Amazon account
+AmazonUI -> Amazon: Authenticate (new password)
+Amazon --> AmazonUI: Success
+Attacker -> AmazonUI: View stored payment methods
+AmazonUI -> Amazon: Fetch card info
+Amazon --> AmazonUI: Show last 4 digits of real card
+note right: Attacker now knows billing address\n+ real card last-4
+
+== Step 4: Take Over Apple (me.com) ==
+Attacker -> Apple: Call support, request reset
+Apple -> Attacker: Ask for billing address + last-4
+Attacker --> Apple: Provide Mat's address + last-4\n(from Amazon UI)
+Apple --> Attacker: Reset me.com password
+
+== Step 5: Take Over Gmail ==
+Attacker -> Gmail: Request password reset
+Gmail --> MeCom: Send reset email to backup ***@me.com
+Attacker -> MeCom: Log into me.com mailbox
+MeCom --> Attacker: Show Gmail reset email
+Attacker -> Gmail: Follow reset link, set new password
+
+@enduml
